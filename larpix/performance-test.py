@@ -1,11 +1,6 @@
-'''
-This module contains methods for setting up and running performance tests of
-the larpix ADC and CSA
-
-'''
+import sys
 import logging
 import larpix.larpix as larpix
-from bitstring import BitArray
 
 def setup_logger(settings):
     logger = logging.getLogger(__name__)
@@ -18,20 +13,28 @@ def setup_logger(settings):
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
+def progress_bar(i, n):
+    if ( i < n ):
+        progress_str = '[' + '|' * int(i/10.) + ' ' * int((n-i)/10.) + ']'
+        print '\rProgress: %s' % progress_str,
+        sys.stdout.flush()
+    else:
+        print 'Done!'
+
 def configure_chips(settings):
     '''
-    Set up chips for testing.
+    Set up chips for performance testing.
 
     '''
     logger = logging.getLogger(__name__)
     logger.info('Configuring chips')
     port = settings['port']
-    outfile = settings['outfile']
+    outfile = settings['outfile'].replace('.json','_config.json')
     controller = larpix.Controller(port)
     for chipargs in chipset:
         chip = larpix.Chip(*chipargs)
         controller.chips.append(chip)
-        
+
     errorcode = 0
     for chip in controller.chips:
         chip.config.csa_testpulse_dac = 0
@@ -40,34 +43,74 @@ def configure_chips(settings):
         read_data = controller.read_configuration(chip)
         if not( chip.config.to_dict() is chip.export_reads() ):
             logger.error(' - Configuration of chip id:%d io:%d failed' %
-                         chip.chip_id, chip.io_chain)
+                    chip.chip_id, chip.io_chain)
             errorcode = 1
         else:
             logger.info('Chip id:%d io:%d configured successfully')
-            chip.config.write(outfile, append=True)
 
     if errorcode == 0:
-        logger.info('All chips configured successfully')
+        logger.info('All chips configured successfully,
+                configuration saved to %s' % outfile)
+        
     else:
         logger.error(' - Chip configuration failed')
     return errorcode
-                            
+
 def csa_noise_test(settings):
     '''
     
     '''
-    
+
 def adc_linearity_test(settings):
     '''
+    Scans through chipset and pulse sizes one by one (1sec each).
+    Saves recorded data to <outfile>_adc-lin.json
 
     '''
+    logger = logging.getLogger(__name__)
+    logger.info('Performing linearity scan')
+    errorcode = 0
+
+    errorcode = configure_chips(settings)
+    if efforcode != 0:
+        logger.warning(' - Chip configuration failed, aborting')
+        return errorcode
+
+    port = settings['port']
+    outfile = settings['outfile'].replace('.json','_adc-lin.json')
+    controller = larpix.Controller(port)
+    for chipargs in chipset:
+        chip = larpix.Chip(*chipargs)
+        controller.chips.append(chip)
+
+    testpulse_values = range(settings['testpulse_step'],
+            settings['testpulse_max'], settings['testpulse_step'])
+    for i,testpulse_value in enumerate(testpulse_values):
+        for chip in controller.chips:
+            # Set testpulse amplitude
+            chip.config.csa_testpulse_dac = testpulse_value
+            testpulse_register = larpix.Configuration.csa_testpulse_amplitude_address
+            controller.write_configuration(chip, registers=testpulse_register)
+            read_data = controller.read_configuration(chip,
+                    registers=testpulse-register)
+            controller.parse_input(read_data)
+            
+            controller.run(1)
+            
+            chip.config.csa_testpulse_dac = 0
+            controller.write_configuration(chip, registers=testpulse_register)
+            
+        progress_bar(i, len(testpulse_values))
+            
+    controller.save_output(outfile)
+    logger.info('Scan complete, saved to %s' % outfile)
 
 if __name__ == '__main__':
     import argparse
     import sys
     tests = {
-            'adc_linearity_test': pcb_io_test,
-            'csa_noise_test': io_loopback_test
+            'adc_linearity_test': adc_linearity_test,
+            'csa_noise_test': csa_noise_test
             }
     parser = argparse.ArgumentParser()
     parser.add_argument('--logfile', default='performance-test.log',
@@ -84,6 +127,10 @@ if __name__ == '__main__':
             help='list of IO chain IDs (corresponding to chipids')
     parse.add_argument('-f', '--outfile', default='performance-data.json',
             help='output data file path')
+    parse.add_argument('--step', default=5,
+            help='testpulse step size in ADC counts')
+    parse.add_argument('--max', default=254,
+            help='testpulse max size in ADC counts')
     args = parser.parse_args()
     if args.list:
         print('\n'.join(tests.keys()))
@@ -96,7 +143,9 @@ if __name__ == '__main__':
             'port': args.port,
             'chipset': chipset,
             'logfile': args.logfile,
-            'outfile': args.outfile    
+            'outfile': args.outfile,
+            'testpulse_step': args.step,
+            'testpulse_max': args.max
             }
     setup_logger({})
     logger = logging.getLogger(__name__)
