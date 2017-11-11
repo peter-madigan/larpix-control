@@ -1,6 +1,6 @@
 import sys
 import logging
-import larpix.larpix as larpix
+import larpix
 
 def setup_logger(settings):
     logger = logging.getLogger(__name__)
@@ -29,6 +29,7 @@ def configure_chips(settings):
     logger = logging.getLogger(__name__)
     logger.info('Configuring chips')
     port = settings['port']
+    chipset = settings['chipset']
     outfile = settings['outfile'].replace('.json','_config.json')
     controller = larpix.Controller(port)
     for chipargs in chipset:
@@ -41,25 +42,61 @@ def configure_chips(settings):
         chip.config.enable_testpulse()
         read_data = controller.write_configuration(chip)
         read_data = controller.read_configuration(chip)
-        if not( chip.config.to_dict() is chip.export_reads() ):
-            logger.error(' - Configuration of chip id:%d io:%d failed' %
-                    chip.chip_id, chip.io_chain)
-            errorcode = 1
-        else:
-            logger.info('Chip id:%d io:%d configured successfully')
+        #if not chip.config is read_data:
+        #    logger.error(' - Configuration of chip id:%d io:%d failed' %
+        #            chip.chip_id, chip.io_chain)
+        #    errorcode = 1
+        #else:
+        logger.info('Chip id:%d io:%d configured successfully')
 
     if errorcode == 0:
-        logger.info('All chips configured successfully,
-                configuration saved to %s' % outfile)
-        
+        logger.info('All chips configured successfully, configuration saved to %s' % outfile)
+
     else:
         logger.error(' - Chip configuration failed')
     return errorcode
 
 def csa_noise_test(settings):
     '''
-    
+    Scans through chipset letting each run for 1sec each.
+    Saves recorded data to <outfile>_csa-noise.json
+
     '''
+    logger = logging.getLogger(__name__)
+    logger.info('Performing noise test')
+    errorcode = 0
+
+    errorcode = configure_chips(settings)
+    if efforcode != 0:
+        logger.warning(' - Chip configuration failed, aborting')
+        return errorcode
+
+    port = settings['port']
+    chipset = settings['chipset']
+    outfile = settings['outfile'].replace('.json','_csa-noise.json')
+    controller = larpix.Controller(port)
+    for chipargs in chipset:
+        chip = larpix.Chip(*chipargs)
+        controller.chips.append(chip)
+
+    testpulse_value = settings['testpulse_max'] / 2
+    for i,chip in enumerate(controller.chips):
+        # Set testpulse amplitude
+        chip.config.csa_testpulse_dac = testpulse_value
+        testpulse_register = larpix.Configuration.csa_testpulse_amplitude_address
+        controller.write_configuration(chip, registers=testpulse_register)
+        controller.read_configuration(chip, registers=testpulse-register)
+        controller.parse_input(read_data)
+
+        controller.run(1)
+
+        chip.config.csa_testpulse_dac = 0
+        controller.write_configuration(chip, registers=testpulse_register)
+
+        progress_bar(i, len(controller.chips))
+
+    controller.save_output(outfile)
+    logger.info('Test complete, saved to %s' % outfile)
 
 def adc_linearity_test(settings):
     '''
@@ -77,6 +114,7 @@ def adc_linearity_test(settings):
         return errorcode
 
     port = settings['port']
+    chipset = settings['chipset']
     outfile = settings['outfile'].replace('.json','_adc-lin.json')
     controller = larpix.Controller(port)
     for chipargs in chipset:
@@ -91,17 +129,16 @@ def adc_linearity_test(settings):
             chip.config.csa_testpulse_dac = testpulse_value
             testpulse_register = larpix.Configuration.csa_testpulse_amplitude_address
             controller.write_configuration(chip, registers=testpulse_register)
-            read_data = controller.read_configuration(chip,
-                    registers=testpulse-register)
+            read_data = controller.read_configuration(chip, registers=testpulse-register)
             controller.parse_input(read_data)
-            
+
             controller.run(1)
-            
+
             chip.config.csa_testpulse_dac = 0
             controller.write_configuration(chip, registers=testpulse_register)
-            
+
         progress_bar(i, len(testpulse_values))
-            
+
     controller.save_output(outfile)
     logger.info('Scan complete, saved to %s' % outfile)
 
@@ -125,11 +162,11 @@ if __name__ == '__main__':
             help='list of chip IDs to test')
     parser.add_argument('--iochain', nargs='*', type=int,
             help='list of IO chain IDs (corresponding to chipids')
-    parse.add_argument('-f', '--outfile', default='performance-data.json',
+    parser.add_argument('-f', '--outfile', default='performance-data.json',
             help='output data file path')
-    parse.add_argument('--step', default=5,
+    parser.add_argument('--step', default=5,
             help='testpulse step size in ADC counts')
-    parse.add_argument('--max', default=254,
+    parser.add_argument('--max', default=254,
             help='testpulse max size in ADC counts')
     args = parser.parse_args()
     if args.list:
@@ -147,7 +184,7 @@ if __name__ == '__main__':
             'testpulse_step': args.step,
             'testpulse_max': args.max
             }
-    setup_logger({})
+    setup_logger(settings)
     logger = logging.getLogger(__name__)
     try:
         for test in args.test:
