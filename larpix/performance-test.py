@@ -30,7 +30,6 @@ def configure_chips(settings):
     logger.info('Configuring chips')
     port = settings['port']
     chipset = settings['chipset']
-    outfile = settings['outfile'].replace('.json','_config.json')
     controller = larpix.Controller(port)
     for chipargs in chipset:
         chip = larpix.Chip(*chipargs)
@@ -38,16 +37,15 @@ def configure_chips(settings):
 
     errorcode = 0
     for chip in controller.chips:
-        chip.config.csa_testpulse_dac = 0
-        chip.config.enable_testpulse()
+        chip.config.load("performance-test-config.json")
         read_data = controller.write_configuration(chip)
-        read_data = controller.read_configuration(chip)
+        #read_data = controller.read_configuration(chip)
         #if not chip.config is read_data:
         #    logger.error(' - Configuration of chip id:%d io:%d failed' %
         #            chip.chip_id, chip.io_chain)
         #    errorcode = 1
         #else:
-        logger.info('Chip id:%d io:%d configured successfully')
+        logger.info('Chip id:%d io:%d configured')
 
     if errorcode == 0:
         logger.info('All chips configured successfully, configuration saved to %s' % outfile)
@@ -58,7 +56,7 @@ def configure_chips(settings):
 
 def csa_noise_test(settings):
     '''
-    Scans through chipset letting each run for 1sec each.
+    Scans through chipset  and pulse sizes one by one (0.1sec each).
     Saves recorded data to <outfile>_csa-noise.json
 
     '''
@@ -75,37 +73,46 @@ def csa_noise_test(settings):
     chipset = settings['chipset']
     outfile = settings['outfile'].replace('.json','_csa-noise.json')
     controller = larpix.Controller(port)
+    controller.timeout = 0.1
+
     for chipargs in chipset:
         chip = larpix.Chip(*chipargs)
+        chip.config.enable_testpulse()
+        chip.config.csa_testpulse_dac = 0
         controller.chips.append(chip)
 
-    testpulse_value = settings['testpulse_max'] / 2
-    for i,chip in enumerate(controller.chips):
-        # Set testpulse amplitude
-        chip.config.csa_testpulse_dac = testpulse_value
-        testpulse_register = larpix.Configuration.csa_testpulse_amplitude_address
-        controller.write_configuration(chip, registers=testpulse_register)
-        controller.read_configuration(chip, registers=testpulse-register)
-        controller.parse_input(read_data)
+        controller.write_configuration(chip)
 
-        controller.run(1)
+    testpulse_values = range(settings['testpulse_step'],
+            settings['testpulse_max'], settings['testpulse_step'])
+    for i,testpulse_value in enumerate(testpulse_values):
+        for j,chip in enumerate(controller.chips):
+            # Set testpulse amplitude
+            chip.config.csa_testpulse_dac = testpulse_value
+            testpulse_register = larpix.Configuration.csa_testpulse_amplitude_address
+            controller.write_configuration(chip, registers=testpulse_register)
+            read_data = controller.read_configuration(chip, registers=testpulse_register)
+            controller.parse_input(read_data)
 
-        chip.config.csa_testpulse_dac = 0
-        controller.write_configuration(chip, registers=testpulse_register)
+            controller.run(0.1)
 
-        progress_bar(i, len(controller.chips))
+            chip.config.csa_testpulse_dac = 0
+            controller.write_configuration(chip, registers=testpulse_register)
+
+        progress_bar(i, len(testpulse_values))
 
     controller.save_output(outfile)
     logger.info('Test complete, saved to %s' % outfile)
 
 def adc_linearity_test(settings):
     '''
-    Scans through chipset and pulse sizes one by one (1sec each).
+    Reads from chips assuming an external trigger and a "pure" sine test
+    See Carl's doc: goo.gl/Keiix9
     Saves recorded data to <outfile>_adc-lin.json
 
     '''
     logger = logging.getLogger(__name__)
-    logger.info('Performing linearity scan')
+    logger.info('Running linearity test')
     errorcode = 0
 
     errorcode = configure_chips(settings)
@@ -116,31 +123,26 @@ def adc_linearity_test(settings):
     port = settings['port']
     chipset = settings['chipset']
     outfile = settings['outfile'].replace('.json','_adc-lin.json')
-    controller = larpix.Controller(port)
-    for chipargs in chipset:
-        chip = larpix.Chip(*chipargs)
-        controller.chips.append(chip)
 
-    testpulse_values = range(settings['testpulse_step'],
-            settings['testpulse_max'], settings['testpulse_step'])
-    for i,testpulse_value in enumerate(testpulse_values):
-        for chip in controller.chips:
-            # Set testpulse amplitude
-            chip.config.csa_testpulse_dac = testpulse_value
-            testpulse_register = larpix.Configuration.csa_testpulse_amplitude_address
-            controller.write_configuration(chip, registers=testpulse_register)
-            read_data = controller.read_configuration(chip, registers=testpulse-register)
-            controller.parse_input(read_data)
+    try:
+        controller = larpix.Controller(port)
+        for chipargs in chipset:
+            chip = larpix.Chip(*chipargs)
+            chip.config.csa_bypass = 1
+            chip.config.enable_external_trigger()
+            controller.chips.append(chip)
 
-            controller.run(1)
+            controller.write_configuration(chip, [c.config.csa_gain_and_bypasses_address,
+                    c.config.external_trigger_mask_addresses])
 
-            chip.config.csa_testpulse_dac = 0
-            controller.write_configuration(chip, registers=testpulse_register)
+            controller.run(30) # need ~3M triggers, if trigger rate is 100k -> 30s of data
+    except Exception as e:
+        logger.error(' - %s' % e)
+        logger.error(' - Run failed. Saving existing data to file.')
+    finally:
+        controller.save_output(outfile)
 
-        progress_bar(i, len(testpulse_values))
-
-    controller.save_output(outfile)
-    logger.info('Scan complete, saved to %s' % outfile)
+    logger.info('Run complete, saved to %s' % outfile)
 
 if __name__ == '__main__':
     import argparse
