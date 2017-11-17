@@ -7,6 +7,7 @@ import pytest
 from larpix.larpix import Chip, Packet, Configuration, Controller
 from bitstring import BitArray
 import json
+import os
 
 class MockSerialPort(object):
     '''
@@ -105,7 +106,17 @@ def test_chip_get_configuration_packets():
     assert packet.packet_type == packet_type
     assert packet.chipid == chip.chip_id
     assert packet.register_address == 40
-    assert packet.register_data == 255
+    assert packet.register_data == 0
+
+def test_chip_sync_configuration():
+    chip = Chip(1, 0)
+    packet_type = Packet.CONFIG_READ_PACKET
+    packets = chip.get_configuration_packets(packet_type)
+    chip.reads = packets
+    chip.sync_configuration()
+    result = chip.config.all_data()
+    expected = [BitArray([0]*8)] * Configuration.num_registers
+    assert result == expected
 
 def test_chip_export_reads():
     chip = Chip(1, 2)
@@ -223,7 +234,7 @@ def test_packet_bytes_properties():
     p = Packet()
     p.packet_type = Packet.DATA_PACKET
     p.chipid = 100
-    expected = b'\x91\x01' + b'\x00' * (Packet.size//8-1)
+    expected = b'\x90\x01' + b'\x00' * (Packet.size//8-1)
     b = p.bytes()
     assert b == expected
 
@@ -488,6 +499,14 @@ def test_packet_get_test_counter():
     expected = 19831
     p.test_counter = expected
     assert p.test_counter == expected
+
+def test_configuration_get_nondefault_registers():
+    c = Configuration()
+    expected = {}
+    assert c.get_nondefault_registers() == expected
+    c.adc_burst_length += 1
+    expected['adc_burst_length'] = c.adc_burst_length
+    assert c.get_nondefault_registers() == expected
 
 def test_configuration_set_pixel_trim_thresholds():
     c = Configuration()
@@ -935,38 +954,38 @@ def test_configuration_disable_external_trigger():
 def test_configuration_enable_testpulse():
     c = Configuration()
     expected = [0, 1] * 16
+    c.disable_testpulse()
     c.enable_testpulse(range(1, 32, 2))
     assert c.csa_testpulse_enable == expected
 
 def test_configuration_enable_testpulse_default():
     c = Configuration()
     expected = [1] * 32
+    c.disable_testpulse()
     c.enable_testpulse()
     assert c.csa_testpulse_enable == expected
 
 def test_configuration_disable_testpulse():
     c = Configuration()
     expected = [0, 1] * 16
-    c.enable_testpulse()
     c.disable_testpulse(range(0, 32, 2))
     assert c.csa_testpulse_enable == expected
 
 def test_configuration_disable_testpulse_default():
     c = Configuration()
     expected = [0] * 32
-    c.enable_testpulse()
     c.disable_testpulse()
     assert c.csa_testpulse_enable == expected
 
 def test_configuration_enable_analog_monitor():
     c = Configuration()
-    expected = [1, 1, 0] + [1] * 29
+    expected = [0, 0, 1] + [0] * 29
     c.enable_analog_monitor(2)
     assert c.csa_monitor_select == expected
 
 def test_configuration_disable_analog_monitor():
     c = Configuration()
-    expected = [1] * 32
+    expected = [0] * 32
     c.enable_analog_monitor(5)
     c.disable_analog_monitor()
     assert c.csa_monitor_select == expected
@@ -983,7 +1002,7 @@ def test_configuration_global_threshold_data():
 
 def test_configuration_csa_gain_and_bypasses_data():
     c = Configuration()
-    expected = BitArray('0b00001001')
+    expected = BitArray('0b00000001')
     assert c.csa_gain_and_bypasses_data() == expected
 
 def test_configuration_csa_bypass_select_data():
@@ -1003,32 +1022,32 @@ def test_configuration_csa_bypass_select_data():
 
 def test_configuration_csa_monitor_select_data():
     c = Configuration()
-    c.csa_monitor_select[4] = 0
-    expected = BitArray('0b11101111')
+    c.csa_monitor_select[4] = 1
+    expected = BitArray('0b00010000')
     assert c.csa_monitor_select_data(0) == expected
-    c.csa_monitor_select[10] = 0
-    expected = BitArray('0b11111011')
+    c.csa_monitor_select[10] = 1
+    expected = BitArray('0b00000100')
     assert c.csa_monitor_select_data(1) == expected
-    c.csa_monitor_select[20] = 0
-    expected = BitArray('0b11101111')
+    c.csa_monitor_select[20] = 1
+    expected = BitArray('0b00010000')
     assert c.csa_monitor_select_data(2) == expected
-    c.csa_monitor_select[30] = 0
-    expected = BitArray('0b10111111')
+    c.csa_monitor_select[30] = 1
+    expected = BitArray('0b01000000')
     assert c.csa_monitor_select_data(3) == expected
 
 def test_configuration_csa_testpulse_enable_data():
     c = Configuration()
-    c.csa_testpulse_enable[4] = 1
-    expected = BitArray('0b00010000')
+    c.csa_testpulse_enable[4] = 0
+    expected = BitArray('0b11101111')
     assert c.csa_testpulse_enable_data(0) == expected
-    c.csa_testpulse_enable[10] = 1
-    expected = BitArray('0b00000100')
+    c.csa_testpulse_enable[10] = 0
+    expected = BitArray('0b11111011')
     assert c.csa_testpulse_enable_data(1) == expected
-    c.csa_testpulse_enable[20] = 1
-    expected = BitArray('0b00010000')
+    c.csa_testpulse_enable[20] = 0
+    expected = BitArray('0b11101111')
     assert c.csa_testpulse_enable_data(2) == expected
-    c.csa_testpulse_enable[30] = 1
-    expected = BitArray('0b01000000')
+    c.csa_testpulse_enable[30] = 0
+    expected = BitArray('0b10111111')
     assert c.csa_testpulse_enable_data(3) == expected
 
 def test_configuration_csa_testpulse_dac_amplitude_data():
@@ -1187,7 +1206,7 @@ def test_configuration_write_force(tmpdir):
     expected = c.to_dict()
     assert result == expected
 
-def test_configuration_read(tmpdir):
+def test_configuration_read_absolute(tmpdir):
     c = Configuration()
     c.pixel_trim_thresholds[0] = 30
     c.reset_cycles = 0x100010
@@ -1197,6 +1216,206 @@ def test_configuration_read(tmpdir):
     c2.load(f)
     expected = c.to_dict()
     result = c2.to_dict()
+    assert result == expected
+
+def test_configuration_read_default():
+    c = Configuration()
+    expected = c.to_dict()
+    c.global_threshold = 100
+    c.load('default.json')
+    result = c.to_dict()
+    assert result == expected
+
+def test_configuration_read_local():
+    c = Configuration()
+    c.global_threshold = 104
+    expected = c.to_dict()
+    abspath = os.path.join(os.getcwd(), 'test_config.json')
+    c.write(abspath)
+    c.global_threshold = 0x10
+    c.load('test_config.json')
+    result = c.to_dict()
+    os.remove(abspath)
+    assert result == expected
+
+def test_configuration_from_dict_reg_pixel_trim():
+    c = Configuration()
+    register_dict = { 0: 5, 15: 100 }
+    c.from_dict_registers(register_dict)
+    result_1 = c.pixel_trim_thresholds[0]
+    expected_1 = register_dict[0]
+    assert result_1 == expected_1
+    result_2 = c.pixel_trim_thresholds[15]
+    expected_2 = register_dict[15]
+    assert result_2 == expected_2
+
+def test_configuration_from_dict_reg_global_threshold():
+    c = Configuration()
+    register_dict = { 32: 182 }
+    c.from_dict_registers(register_dict)
+    result = c.global_threshold
+    expected = register_dict[32]
+    assert result == expected
+
+def test_configuration_from_dict_reg_csa_gain():
+    c = Configuration()
+    register_dict = { 33: 0 }
+    c.from_dict_registers(register_dict)
+    result = c.csa_gain
+    expected = 0
+    assert result == expected
+
+def test_configuration_from_dict_reg_csa_bypass():
+    c = Configuration()
+    register_dict = { 33: 2 }
+    c.from_dict_registers(register_dict)
+    result = c.csa_bypass
+    expected = 1
+    assert result == expected
+
+def test_configuration_from_dict_reg_internal_bypass():
+    c = Configuration()
+    register_dict = { 33: 8 }
+    c.from_dict_registers(register_dict)
+    result = c.internal_bypass
+    expected = 1
+    assert result == expected
+
+def test_configuration_from_dict_reg_csa_bypass_select():
+    c = Configuration()
+    register_dict = { 34: 0x12, 35: 0x34, 36: 0x56, 37: 0x78 }
+    c.from_dict_registers(register_dict)
+    result = c.csa_bypass_select
+    expected = [
+            0, 1, 0, 0, 1, 0, 0, 0,
+            0, 0, 1, 0, 1, 1, 0, 0,
+            0, 1, 1, 0, 1, 0, 1, 0,
+            0, 0, 0, 1, 1, 1, 1, 0
+            ]
+    assert result == expected
+
+def test_configuration_from_dict_reg_csa_monitor_select():
+    c = Configuration()
+    register_dict = { 38: 0x12, 39: 0x34, 40: 0x56, 41: 0x78 }
+    c.from_dict_registers(register_dict)
+    result = c.csa_monitor_select
+    expected = [
+            0, 1, 0, 0, 1, 0, 0, 0,
+            0, 0, 1, 0, 1, 1, 0, 0,
+            0, 1, 1, 0, 1, 0, 1, 0,
+            0, 0, 0, 1, 1, 1, 1, 0
+            ]
+    assert result == expected
+
+def test_configuration_from_dict_reg_csa_testpulse_enable():
+    c = Configuration()
+    register_dict = { 42: 0x12, 43: 0x34, 44: 0x56, 45: 0x78 }
+    c.from_dict_registers(register_dict)
+    result = c.csa_testpulse_enable
+    expected = [
+            0, 1, 0, 0, 1, 0, 0, 0,
+            0, 0, 1, 0, 1, 1, 0, 0,
+            0, 1, 1, 0, 1, 0, 1, 0,
+            0, 0, 0, 1, 1, 1, 1, 0
+            ]
+    assert result == expected
+
+def test_configuration_from_dict_reg_csa_testpulse_dac_amplitude():
+    c = Configuration()
+    register_dict = { 46: 193 }
+    c.from_dict_registers(register_dict)
+    result = c.csa_testpulse_dac_amplitude
+    expected = 193
+    assert result == expected
+
+def test_configuration_from_dict_reg_test_mode():
+    c = Configuration()
+    register_dict = { 47: 2 }
+    c.from_dict_registers(register_dict)
+    result = c.test_mode
+    expected = 2
+    assert result == expected
+
+def test_configuration_from_dict_reg_cross_trigger_mode():
+    c = Configuration()
+    register_dict = { 47: 4 }
+    c.from_dict_registers(register_dict)
+    result = c.cross_trigger_mode
+    expected = 1
+    assert result == expected
+
+def test_configuration_from_dict_reg_periodic_reset():
+    c = Configuration()
+    register_dict = { 47: 8 }
+    c.from_dict_registers(register_dict)
+    result = c.periodic_reset
+    expected = 1
+    assert result == expected
+
+def test_configuration_from_dict_reg_fifo_diagnostic():
+    c = Configuration()
+    register_dict = { 47: 16 }
+    c.from_dict_registers(register_dict)
+    result = c.fifo_diagnostic
+    expected = 1
+    assert result == expected
+
+def test_configuration_from_dict_reg_sample_cycles():
+    c = Configuration()
+    register_dict = { 48: 111 }
+    c.from_dict_registers(register_dict)
+    result = c.sample_cycles
+    expected = 111
+    assert result == expected
+
+def test_configuration_from_dict_reg_test_burst_length():
+    c = Configuration()
+    register_dict = { 49: 5, 50: 2}
+    c.from_dict_registers(register_dict)
+    result = c.test_burst_length
+    expected = 517  # = 256 * 2 + 1 * 5
+    assert result == expected
+
+def test_configuration_from_dict_reg_adc_burst_length():
+    c = Configuration()
+    register_dict = { 51: 83 }
+    c.from_dict_registers(register_dict)
+    result = c.adc_burst_length
+    expected = 83
+    assert result == expected
+
+def test_configuration_from_dict_reg_channel_mask():
+    c = Configuration()
+    register_dict = { 52: 0x12, 53: 0x34, 54: 0x56, 55: 0x78 }
+    c.from_dict_registers(register_dict)
+    result = c.channel_mask
+    expected = [
+            0, 1, 0, 0, 1, 0, 0, 0,
+            0, 0, 1, 0, 1, 1, 0, 0,
+            0, 1, 1, 0, 1, 0, 1, 0,
+            0, 0, 0, 1, 1, 1, 1, 0
+            ]
+    assert result == expected
+
+def test_configuration_from_dict_reg_external_trigger_mask():
+    c = Configuration()
+    register_dict = { 56: 0x12, 57: 0x34, 58: 0x56, 59: 0x78 }
+    c.from_dict_registers(register_dict)
+    result = c.external_trigger_mask
+    expected = [
+            0, 1, 0, 0, 1, 0, 0, 0,
+            0, 0, 1, 0, 1, 1, 0, 0,
+            0, 1, 1, 0, 1, 0, 1, 0,
+            0, 0, 0, 1, 1, 1, 1, 0
+            ]
+    assert result == expected
+
+def test_configuration_from_dict_reg_reset_cycles():
+    c = Configuration()
+    register_dict = { 60: 0x12, 61: 0x34, 62: 0x56 }
+    c.from_dict_registers(register_dict)
+    result = c.reset_cycles
+    expected = 0x563412
     assert result == expected
 
 def test_controller_init_chips():
@@ -1303,11 +1522,14 @@ def test_controller_write_configuration_write_read(capfd):
     controller = Controller(None)
     controller._serial = MockSerialPort
     controller.timeout=0.01
-    chip = Chip(2, 4)
-    to_read = b's12345678q'
+    chip = Chip(2, 0)
+    controller.chips.append(chip)
+    to_read = b's\x08\x0034567\x00q'
     MockSerialPort.data_to_mock_read = to_read
-    result = controller.write_configuration(chip, registers=5, write_read=0.1)
-    assert result == to_read
+    unprocessed = controller.write_configuration(chip, registers=5, write_read=0.1)
+    assert unprocessed == b''
+    result = chip.reads[0].bytes()
+    assert result == to_read[1:-2]
     conf_data = chip.get_configuration_packets(Packet.CONFIG_WRITE_PACKET)[5]
     expected = bytes2str(controller.format_UART(chip, conf_data))
     result, err = capfd.readouterr()
