@@ -942,6 +942,30 @@ class Controller(object):
             chip = self.get_chip(chip_id, io_chain)
             chip.reads.append(by_chipid[chip_id])
 
+    def reset_reads(self):
+        '''
+        Resets the reads list for both the controller and the chips
+        and resets the read counter - use with caution
+        If you want to reset just the read lists, use ``clear_reads()``
+
+        '''
+        self.nreads = 0
+        self.clear_reads()
+
+    def clear_reads(self):
+        '''
+        Resets the reads list for both the controller and the chips
+        without resetting the read counter
+        If you want to reset the read counter as well, use ``reset_reads()``
+
+        '''
+        self.reads = []
+        if self.use_all_chips:
+            for chip in self.all_chips:
+                chip.reads = []
+        else:
+            for chip in self.chips:
+                chip.reads = []
 
     def format_bytestream(self, formatted_packets):
         bytestreams = []
