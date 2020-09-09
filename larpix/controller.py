@@ -906,7 +906,7 @@ class Controller(object):
         return packets, bytestream
 
     def write_configuration(self, chip_key, registers=None, write_read=0,
-                            message=None, connection_delay=0.2):
+                            message=None, connection_delay=0.01):
         '''
         Send the configurations stored in chip.config to the LArPix
         ASIC.

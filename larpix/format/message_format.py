@@ -116,10 +116,10 @@ def dataserver_message_decode(msgs, version=(1,0), **kwargs):
             if len(payload)%8 == 0:
                 for start_index in range(0, len(payload), 8):
                     packet_bytes = payload[start_index:start_index+8]
-                    if Packet == Packet_v1:
-                        packets.append(Packet(packet_bytes[:-1]))
-                    elif Packet == Packet_v2:
-                        packets.append(Packet(packet_bytes))
+                    # if Packet == Packet_v1:
+                    packets.append(Packet_v1(packet_bytes[:-1]))
+                    # elif Packet == Packet_v2:
+                    #     packets.append(Packet(packet_bytes))
                     packets[-1].io_channel = io_chain
                     if kwargs:
                         for key,value in kwargs.items():

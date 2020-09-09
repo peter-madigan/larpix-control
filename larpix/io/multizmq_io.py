@@ -117,7 +117,6 @@ class MultiZMQ_IO(IO):
                 msg_data += [fmt_bytestr % (packet.bytes()[::-1].encode('hex'), io_chain)]
             else:
                 msg_data += [fmt_bytestr % (packet.bytes()[::-1].hex().encode(), io_chain)]
-        print(msg_data)
         return msg_data
 
     def empty_queue(self):
